@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>simple-peer</title>
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+  <script src="crafy-simple-peer.js"></script>
+  <style>
+    textarea {
+      display:block;
+      width:80%;
+    }
+
+    video {
+      display:block;
+      width:80%;
+      height:300px;
+    }
+  </style>
+</head>
+<body>
+  <h2>SENDER</h2>
+  <div>
+    <textarea id="receiveDataTextarea" placeholder="Signal from other peer"></textarea>
+    <button type="button" id="receiveDataButton">LOAD</button>
+  </div>
+  <p>Signals for the others peer:</p>
+  <div id="signals_textareas"></div>
+  <div id="videos_section"></div>
+  <div>
+    <button type="button" id="muteAudioButton">Toggle mute my audio</button>
+    <button type="button" id="muteVideoButton">Toggle mute my video</button>
+  </div>
+  <div id="messages_section"></div>
+  <div>
+    <textarea id="sendMessageInput" placeholder="write a message"></textarea>
+    <button type="button" id="sendMessageButton">SEND</button>
+  </div>
+  <script>
+    var im_sender = true;
+    var signals_textareas = document.getElementById('signals_textareas');
+    var videos_section = document.getElementById('videos_section');
+    var messages_section = document.getElementById('messages_section');
+    var receiveDataTextarea = document.getElementById('receiveDataTextarea');
+    var receiveDataButton = document.getElementById('receiveDataButton');
+    var sendMessageInput = document.getElementById('sendMessageInput');
+    var sendMessageButton = document.getElementById('sendMessageButton');
+    var muteAudioButton = document.getElementById('muteAudioButton');
+    var muteVideoButton = document.getElementById('muteVideoButton');
+
+    var peer_id;
+    var CrafySimplePeerInstance = new CrafySimplePeer();
+    CrafySimplePeerInstance.init().then(function () {
+      peer_id = CrafySimplePeerInstance.createPeer(im_sender);
+    });
+    CrafySimplePeerInstance.onPeerStream = function (stream, peer_id) {
+      var video = document.createElement('video');
+      videos_section.appendChild(video);
+      if ('srcObject' in video) {
+        video.srcObject = stream;
+      } else {
+        video.src = window.URL.createObjectURL(stream); // for older browsers
+      }
+      video.play();
+    };
+    CrafySimplePeerInstance.onPeerMessage = function (message, peer_id) {
+      messages_section.innerHTML += '<p>' + message + '</p>';
+    }
+    CrafySimplePeerInstance.onMustSignalingPeer = function (info, peer_id) {
+      signals_textareas.innerHTML += '<textarea>'+info+'</textarea>';
+    }
+
+    receiveDataButton.onclick = function () {
+      CrafySimplePeerInstance.receiveData(receiveDataTextarea.value, peer_id);
+    };
+    sendMessageButton.onclick = function () {
+      CrafySimplePeerInstance.sendMessage(sendMessageInput.value, peer_id);
+    };
+    muteAudioButton.onclick = function () {
+      CrafySimplePeerInstance.toggleCurrMuteAudio();
+    };
+    muteVideoButton.onclick = function () {
+      CrafySimplePeerInstance.toggleCurrMuteVideo();
+    };
+  </script>
+</body>
+</html>
