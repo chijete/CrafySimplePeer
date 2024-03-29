@@ -37,7 +37,7 @@ class CrafySimplePeer {
   }
 
   onPeerError(err, peer_id) {
-    console.log('CrafySimplePeer > onPeerError', err, peer_id);
+    console.error('CrafySimplePeer > onPeerError', err, peer_id);
   }
 
   // Create peer (new user to connect)
@@ -45,6 +45,25 @@ class CrafySimplePeer {
   createPeer(initiator = true, metadata = null) {
     var savedThis = this;
     var peer_id = this.generatePeerId();
+    var peer = this.realCreatePeer(initiator, peer_id);
+    peer.on('stream', stream => {
+      savedThis.onStream(stream, peer_id);
+    });
+    this.peers[peer_id] = {
+      'lastSignalChunk': [],
+      'lastSignalSended': true,
+      'lastSignalTime': 0,
+      'metadata': metadata,
+      'status': 'connecting',
+      'receivedDataTimes': 0,
+      'initiator': initiator,
+    };
+    this.peers[peer_id]['peer'] = peer;
+    return peer_id;
+  }
+
+  realCreatePeer(initiator, peer_id) {
+    var savedThis = this;
     var peer_config = {
       initiator: initiator
     };
@@ -71,16 +90,7 @@ class CrafySimplePeer {
     peer.on('stream', stream => {
       savedThis.onStream(stream, peer_id);
     });
-    this.peers[peer_id] = {
-      'lastSignalChunk': [],
-      'lastSignalSended': true,
-      'lastSignalTime': 0,
-      'metadata': metadata,
-      'status': 'connecting',
-      'receivedDataTimes': 0,
-    };
-    this.peers[peer_id]['peer'] = peer;
-    return peer_id;
+    return peer;
   }
 
   // Close connection with peer
@@ -115,6 +125,20 @@ class CrafySimplePeer {
   }
 
   onError(err, peer_id) {
+    if (err.code == 'ERR_CREATE_OFFER') {
+      this.peers[peer_id]['status'] = 'closed';
+    } else if (err.code == 'ERR_WEBRTC_SUPPORT') {
+      this.peers[peer_id]['status'] = 'closed';
+    } else if (err.code == 'ERR_CREATE_ANSWER') {
+      this.peers[peer_id]['status'] = 'closed';
+      this.resetPeerConnection(peer_id);
+    } else if (err.code == 'ERR_ICE_CONNECTION_FAILURE') {
+      this.peers[peer_id]['status'] = 'closed';
+      this.resetPeerConnection(peer_id);
+    } else if (err.code == 'ERR_CONNECTION_FAILURE') {
+      this.peers[peer_id]['status'] = 'closed';
+      this.resetPeerConnection(peer_id);
+    }
     this.onPeerError(err, peer_id);
   }
 
@@ -131,11 +155,37 @@ class CrafySimplePeer {
     } else {
       this.peers[peer_id]['stream_video'].src = window.URL.createObjectURL(stream); // for older browsers
     }
+    this.peers[peer_id]['stream_video'].setAttribute('stream-peer-id', peer_id);
     this.onPeerStream(stream, peer_id);
+  }
+
+  resetPeerConnection(peer_id) {
+    if (this.peers[peer_id] !== undefined) {
+      this.peers[peer_id]['status'] = 'connecting';
+      if (this.peers[peer_id]['initiator']) {
+        this.sendCustomSignal({
+          'code': 100
+        }, peer_id);
+      } else {
+        var newPeer = this.realCreatePeer(false, peer_id);
+        this.peers[peer_id]['peer'] = newPeer;
+        this.sendCustomSignal({
+          'code': 200
+        }, peer_id);
+      }
+      return true;
+    } else {
+      return false;
+    }
   }
 
   sendData(data, peer_id) {
     var info = btoa(JSON.stringify(data));
+    this.onMustSignalingPeer(info, peer_id);
+  }
+
+  sendCustomSignal(data, peer_id) {
+    var info = btoa('custom:' + JSON.stringify(data));
     this.onMustSignalingPeer(info, peer_id);
   }
 
@@ -323,12 +373,30 @@ class CrafySimplePeer {
   // Receive signaling data from the other peer
 
   receiveData(b64_data, peer_id) {
-    var datas = JSON.parse(atob(b64_data));
-    for (const data of datas) {
-      this.peers[peer_id]['peer'].signal(data);
+    var atobed_data = atob(b64_data);
+    if (atobed_data.startsWith('custom:')) {
+      var received_signal_data = JSON.parse(atobed_data.substring(7));
+      if (received_signal_data['code'] == 100) {
+        var newPeer = this.realCreatePeer(false, peer_id);
+        this.peers[peer_id]['peer'] = newPeer;
+        this.sendCustomSignal({
+          'code': 101
+        }, peer_id);
+      } else if (received_signal_data['code'] == 200) {
+        var newPeer = this.realCreatePeer(true, peer_id);
+        this.peers[peer_id]['peer'] = newPeer;
+      } else if (received_signal_data['code'] == 101) {
+        var newPeer = this.realCreatePeer(true, peer_id);
+        this.peers[peer_id]['peer'] = newPeer;
+      }
+    } else {
+      var datas = JSON.parse(atobed_data);
+      for (const data of datas) {
+        this.peers[peer_id]['peer'].signal(data);
+      }
+      this.peers[peer_id]['receivedDataTimes'] += 1;
+      this.checkRemoteStreamsInterval();
     }
-    this.peers[peer_id]['receivedDataTimes'] += 1;
-    this.checkRemoteStreamsInterval();
   }
 
   // Send string message to the other peer
